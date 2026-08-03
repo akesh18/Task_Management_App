@@ -89,3 +89,40 @@ def delete_task(task_id: int, db: Session = Depends(database.get_db), current_us
     db.delete(task)
     db.commit()
     return {"message": "Task deleted successfully"}
+
+@router.put("/tasks/{task_id}", response_model=schemas.TaskResponse)
+def update_task(task_id: int, task_data: schemas.TaskUpdate, db: Session = Depends(database.get_db), current_user: models.User = Depends(get_current_user)):
+    task = db.query(models.Task).filter(models.Task.id == task_id, models.Task.owner_id == current_user.id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    if task_data.title is not None:
+        task.title = task_data.title
+    if task_data.description is not None:
+        task.description = task_data.description
+    if task_data.completed is not None:
+        task.completed = task_data.completed
+
+    db.commit()
+    db.refresh(task)
+    return task
+
+@router.get("/admin/users-overview")
+def get_admin_overview(db: Session = Depends(database.get_db), current_user: models.User = Depends(get_current_user)):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Unauthorized: Super Admin access required")
+    
+    users = db.query(models.User).all()
+    tasks = db.query(models.Task).all()
+    
+    user_list = []
+    for u in users:
+        u_tasks = [t for t in tasks if t.owner_id == u.id]
+        user_list.append({
+            "id": u.id,
+            "username": u.username,
+            "is_admin": u.is_admin,
+            "task_count": len(u_tasks),
+            "tasks": [{"id": t.id, "title": t.title, "completed": t.completed} for t in u_tasks]
+        })
+    return user_list

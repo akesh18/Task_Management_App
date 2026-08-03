@@ -1,7 +1,15 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 
-# User Schemas
+# --- JWT Token Schemas ---
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class TokenData(BaseModel):
+    username: Optional[str] = None
+
+# --- User Schemas ---
 class UserCreate(BaseModel):
     username: str
     password: str
@@ -9,26 +17,39 @@ class UserCreate(BaseModel):
 class UserResponse(BaseModel):
     id: int
     username: str
+    is_admin: bool = False
 
     class Config:
         from_attributes = True
 
-# Token Schema
-class Token(BaseModel):
-    access_token: str
-    token_type: str
-
-# Task Schemas
-class TaskCreate(BaseModel):
+# --- Task Schemas ---
+class TaskBase(BaseModel):
     title: str
     description: Optional[str] = None
 
-class TaskResponse(BaseModel):
+class TaskCreate(TaskBase):
+    pass
+
+class TaskUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    completed: Optional[bool] = None
+
+class TaskResponse(TaskBase):
     id: int
-    title: str
-    description: Optional[str] = None
     completed: bool
     owner_id: int
+
+    class Config:
+        from_attributes = True
+
+# --- Admin Overview Schema ---
+class AdminUserOverview(BaseModel):
+    id: int
+    username: str
+    is_admin: bool
+    task_count: int
+    tasks: List[TaskResponse]
 
     class Config:
         from_attributes = True
