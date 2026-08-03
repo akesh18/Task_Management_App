@@ -1,13 +1,36 @@
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
-from app.database import engine, Base
+from app.database import engine, Base, SessionLocal
 from app import auth
+from app import auth, models
+from passlib.context import CryptContext
 
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Smart Task Management System")
 
 app.include_router(auth.router)
+# Automatically create admin on startup
+@app.on_event("startup")
+def startup_db_setup():
+    db = SessionLocal()
+    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    ADMIN_USER = "admin"
+    ADMIN_PASS = "admin123"
+    
+    try:
+        existing_admin = db.query(models.User).filter(models.User.username == ADMIN_USER).first()
+        if not existing_admin:
+            hashed_pw = pwd_context.hash(ADMIN_PASS)
+            admin_user = models.User(username=ADMIN_USER, hashed_password=hashed_pw, is_admin=True)
+            db.add(admin_user)
+            db.commit()
+            print("Super Admin created automatically on startup!")
+    except Exception as e:
+        db.rollback()
+        print("Startup admin creation error:", e)
+    finally:
+        db.close()
 
 html_content = """
 <!DOCTYPE html>
