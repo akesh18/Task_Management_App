@@ -1,7 +1,6 @@
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from app.database import engine, Base, SessionLocal
-from app import auth
 from app import auth, models
 from passlib.context import CryptContext
 
@@ -9,8 +8,6 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Smart Task Management System")
 
-app.include_router(auth.router)
-# Automatically create admin on startup
 @app.on_event("startup")
 def startup_db_setup():
     db = SessionLocal()
@@ -32,6 +29,8 @@ def startup_db_setup():
     finally:
         db.close()
 
+app.include_router(auth.router)
+
 html_content = """
 <!DOCTYPE html>
 <html lang="en">
@@ -43,8 +42,18 @@ html_content = """
 </head>
 <body class="bg-gray-100 min-h-screen p-6">
     <div class="max-w-3xl mx-auto bg-white p-6 rounded-lg shadow-md">
-        <h1 class="text-2xl font-bold mb-4 text-center text-blue-600">📝 Task Management Dashboard</h1>
         
+        <!-- Header & Logout -->
+        <div class="flex justify-between items-center mb-6 border-b pb-4">
+            <h1 class="text-2xl font-bold text-blue-600">📝 Task Management Dashboard</h1>
+            <div id="userSection" class="hidden">
+                <button onclick="logout()" class="bg-red-500 hover:bg-red-600 text-white px-4 py-1.5 rounded font-semibold text-sm shadow">
+                    🔒 Logout
+                </button>
+            </div>
+        </div>
+        
+        <!-- Auth Section -->
         <div id="authSection" class="mb-6 p-4 border rounded bg-gray-50">
             <h2 class="font-semibold mb-2">1-Click Login / Account</h2>
             <input id="username" type="text" placeholder="Username" class="border p-2 rounded mr-2 w-1/3">
@@ -53,6 +62,7 @@ html_content = """
             <button onclick="signup()" class="bg-gray-500 text-white px-4 py-2 rounded">Signup</button>
         </div>
 
+        <!-- Task Form -->
         <div id="taskForm" class="mb-6 hidden">
             <h2 class="font-semibold mb-2">Add New Task</h2>
             <input id="taskTitle" type="text" placeholder="Task Title" class="border p-2 rounded w-full mb-2">
@@ -67,9 +77,17 @@ html_content = """
     <script>
         let token = localStorage.getItem("token") || "";
 
-        if(token) {
+        if (token) {
+            document.getElementById("authSection").classList.add("hidden");
+            document.getElementById("userSection").classList.remove("hidden");
             showTasks();
             checkAdmin();
+        }
+
+        function logout() {
+            localStorage.removeItem("token");
+            alert("Logged out successfully!");
+            window.location.reload();
         }
 
         async function login() {
@@ -85,8 +103,7 @@ html_content = """
                 token = data.access_token;
                 localStorage.setItem("token", token);
                 alert("Logged in successfully!");
-                showTasks();
-                checkAdmin();
+                window.location.reload();
             } else {
                 alert("Login failed!");
             }
