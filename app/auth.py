@@ -126,3 +126,36 @@ def get_admin_overview(db: Session = Depends(database.get_db), current_user: mod
             "tasks": [{"id": t.id, "title": t.title, "completed": t.completed} for t in u_tasks]
         })
     return user_list
+
+# User khud apna account delete kar sake
+@router.delete("/users/me")
+def delete_own_account(
+    db: Session = Depends(database.get_db), 
+    current_user: models.User = Depends(get_current_user)
+):
+    db.query(models.Task).filter(models.Task.owner_id == current_user.id).delete()
+    db.delete(current_user)
+    db.commit()
+    return {"message": "Account deleted successfully"}
+
+# Admin kisi bhi user ko delete kar sake
+@router.delete("/admin/users/{user_id}")
+def delete_user_by_admin(
+    user_id: int, 
+    db: Session = Depends(database.get_db), 
+    current_user: models.User = Depends(get_current_user)
+):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Unauthorized access")
+    
+    user_to_delete = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user_to_delete:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    if user_to_delete.is_admin:
+        raise HTTPException(status_code=400, detail="Cannot delete Super Admin")
+        
+    db.query(models.Task).filter(models.Task.owner_id == user_id).delete()
+    db.delete(user_to_delete)
+    db.commit()
+    return {"message": f"User {user_to_delete.username} deleted"}

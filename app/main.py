@@ -1,3 +1,4 @@
+
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from app.database import engine, Base, SessionLocal
@@ -43,10 +44,13 @@ html_content = """
 <body class="bg-gray-100 min-h-screen p-6">
     <div class="max-w-3xl mx-auto bg-white p-6 rounded-lg shadow-md">
         
-        <!-- Header & Logout -->
+        <!-- Header, User Actions & Logout -->
         <div class="flex justify-between items-center mb-6 border-b pb-4">
             <h1 class="text-2xl font-bold text-blue-600">📝 Task Management Dashboard</h1>
-            <div id="userSection" class="hidden">
+            <div id="userSection" class="hidden flex gap-2">
+                <button id="deleteMyAccountBtn" onclick="deleteMyAccount()" class="bg-red-100 text-red-600 hover:bg-red-200 border border-red-300 px-3 py-1.5 rounded font-semibold text-xs shadow-sm hidden">
+                    🗑️ Delete My Account
+                </button>
                 <button onclick="logout()" class="bg-red-500 hover:bg-red-600 text-white px-4 py-1.5 rounded font-semibold text-sm shadow">
                     🔒 Logout
                 </button>
@@ -88,6 +92,41 @@ html_content = """
             localStorage.removeItem("token");
             alert("Logged out successfully!");
             window.location.reload();
+        }
+
+        async function deleteMyAccount() {
+            if(!confirm("Are you sure you want to permanently delete your account and all associated tasks?")) return;
+            
+            const res = await fetch("/users/me", {
+                method: "DELETE",
+                headers: { "Authorization": "Bearer " + token }
+            });
+
+            if(res.ok) {
+                alert("Your account has been deleted successfully.");
+                localStorage.removeItem("token");
+                window.location.reload();
+            } else {
+                alert("Failed to delete account.");
+            }
+        }
+
+        async function deleteUserByAdmin(userId, username) {
+            if(!confirm(`Are you sure you want to delete user '${username}' and all their tasks?`)) return;
+
+            const res = await fetch("/admin/users/" + userId, {
+                method: "DELETE",
+                headers: { "Authorization": "Bearer " + token }
+            });
+
+            if(res.ok) {
+                alert(`User ${username} deleted successfully!`);
+                checkAdmin();
+                showTasks();
+            } else {
+                const data = await res.json();
+                alert(data.detail || "Failed to delete user.");
+            }
         }
 
         async function login() {
@@ -146,18 +185,24 @@ html_content = """
                 headers: { "Authorization": "Bearer " + token }
             });
             
+            const deleteBtn = document.getElementById("deleteMyAccountBtn");
+
             if (res.ok) {
+                // Admin logged in -> Hide "Delete My Account" button
+                if (deleteBtn) deleteBtn.classList.add("hidden");
+
                 const data = await res.json();
                 let adminHtml = `
                 <div class="border-t-2 pt-4">
                     <h2 class="text-xl font-bold text-red-600 mb-4">👑 Super Admin Dashboard</h2>
-                    <table class="w-full border-collapse border border-gray-300 bg-white shadow-sm">
+                    <table class="w-full border-collapse border border-gray-300 bg-white shadow-sm text-sm">
                         <thead>
                             <tr class="bg-gray-200 text-left">
                                 <th class="p-2 border">ID</th>
                                 <th class="p-2 border">Username</th>
                                 <th class="p-2 border">Role</th>
                                 <th class="p-2 border">Total Tasks</th>
+                                <th class="p-2 border">Action</th>
                             </tr>
                         </thead>
                         <tbody>`;
@@ -169,6 +214,10 @@ html_content = """
                             <td class="p-2 border font-semibold">${u.username}</td>
                             <td class="p-2 border">${u.is_admin ? '<span class="text-red-500 font-bold">Admin</span>' : 'User'}</td>
                             <td class="p-2 border">${u.task_count}</td>
+                            <td class="p-2 border">
+                                ${u.is_admin ? '<span class="text-gray-400 text-xs">Protected</span>' : 
+                                `<button onclick="deleteUserByAdmin(${u.id}, '${u.username}')" class="bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded text-xs font-semibold">Delete User</button>`}
+                            </td>
                         </tr>`;
                 });
 
@@ -177,6 +226,8 @@ html_content = """
                 adminDiv.innerHTML = adminHtml;
                 adminDiv.classList.remove("hidden");
             } else {
+                // Normal User logged in -> Show "Delete My Account" button
+                if (deleteBtn) deleteBtn.classList.remove("hidden");
                 document.getElementById("adminDashboard").classList.add("hidden");
             }
         }
@@ -228,4 +279,3 @@ html_content = """
 @app.get("/", response_class=HTMLResponse)
 def read_root():
     return html_content
-
