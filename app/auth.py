@@ -1,25 +1,19 @@
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-from datetime import datetime, timedelta
-from jose import JWTError, jwt
 from passlib.context import CryptContext
-from app import models, schemas, database
-
-router = APIRouter()
+from jose import JWTError, jwt
+from app import database, models, schemas
 
 SECRET_KEY = "your_secret_key_here"
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = 600
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
-
-def get_password_hash(password):
-    return pwd_context.hash(password)
+router = APIRouter()
 
 def create_access_token(data: dict):
     to_encode = data.copy()
@@ -40,94 +34,90 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
             raise credentials_exception
     except JWTError:
         raise credentials_exception
+        
     user = db.query(models.User).filter(models.User.username == username).first()
     if user is None:
         raise credentials_exception
     return user
 
-# --- AUTH ENDPOINTS ---
-
-@router.post("/signup", response_model=schemas.UserResponse)
-def signup(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
-    db_user = db.query(models.User).filter(models.User.username == user.username).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="Username already registered")
-    hashed_pwd = get_password_hash(user.password)
-    new_user = models.User(username=user.username, hashed_password=hashed_pwd)
+# ================= SIGNUP ROUTE =================
+@router.post("/signup")
+def create_user(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
+    if user.username.lower() == "admin":
+        raise HTTPException(
+            status_code=400, 
+            detail="Username already exists, please choose another username"
+        )
+        
+    existing_user = db.query(models.User).filter(models.User.username == user.username).first()
+    if existing_user:
+        raise HTTPException(
+            status_code=400, 
+            detail="Username already exists, please choose another username"
+        )
+        
+    hashed_pw = pwd_context.hash(user.password)
+    new_user = models.User(username=user.username, hashed_password=hashed_pw, is_admin=False)
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
-    return new_user
+    return {"message": "User created successfully"}
 
-@router.post("/login", response_model=schemas.Token)
+# ================= LOGIN ROUTE =================
+@router.post("/login")
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(database.get_db)):
     user = db.query(models.User).filter(models.User.username == form_data.username).first()
-    if not user or not verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(status_code=400, detail="Incorrect username or password")
+    login_role = form_data.client_id or "user"
+
+    if not user:
+        raise HTTPException(
+            status_code=404, 
+            detail="Username not registered, please create new account"
+        )
+        
+    if login_role == "user" and user.is_admin:
+        raise HTTPException(
+            status_code=403, 
+            detail="Admin account cannot be logged in from User login page."
+        )
+        
+    if login_role == "admin" and not user.is_admin:
+        raise HTTPException(
+            status_code=403, 
+            detail="You are not authorized to login as Admin."
+        )
+
+    if not pwd_context.verify(form_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=401, 
+            detail="The password you've entered is incorrect. Please enter correct password"
+        )
+
     access_token = create_access_token(data={"sub": user.username})
     return {"access_token": access_token, "token_type": "bearer"}
 
-# --- TASK ENDPOINTS ---
-
-@router.get("/tasks/", response_model=list[schemas.TaskResponse])
-def get_tasks(db: Session = Depends(database.get_db), current_user: models.User = Depends(get_current_user)):
-    return db.query(models.Task).filter(models.Task.owner_id == current_user.id).all()
-
-@router.post("/tasks/", response_model=schemas.TaskResponse)
-def create_task(task: schemas.TaskCreate, db: Session = Depends(database.get_db), current_user: models.User = Depends(get_current_user)):
-    new_task = models.Task(**task.dict(), owner_id=current_user.id)
-    db.add(new_task)
-    db.commit()
-    db.refresh(new_task)
-    return new_task
-
-@router.delete("/tasks/{task_id}")
-def delete_task(task_id: int, db: Session = Depends(database.get_db), current_user: models.User = Depends(get_current_user)):
-    task = db.query(models.Task).filter(models.Task.id == task_id, models.Task.owner_id == current_user.id).first()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    db.delete(task)
-    db.commit()
-    return {"message": "Task deleted successfully"}
-
-@router.put("/tasks/{task_id}", response_model=schemas.TaskResponse)
-def update_task(task_id: int, task_data: schemas.TaskUpdate, db: Session = Depends(database.get_db), current_user: models.User = Depends(get_current_user)):
-    task = db.query(models.Task).filter(models.Task.id == task_id, models.Task.owner_id == current_user.id).first()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    
-    if task_data.title is not None:
-        task.title = task_data.title
-    if task_data.description is not None:
-        task.description = task_data.description
-    if task_data.completed is not None:
-        task.completed = task_data.completed
-
-    db.commit()
-    db.refresh(task)
-    return task
-
+# ================= ADMIN OVERVIEW ROUTE =================
 @router.get("/admin/users-overview")
-def get_admin_overview(db: Session = Depends(database.get_db), current_user: models.User = Depends(get_current_user)):
+def get_admin_overview(
+    db: Session = Depends(database.get_db), 
+    current_user: models.User = Depends(get_current_user)
+):
     if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Unauthorized: Super Admin access required")
+        raise HTTPException(status_code=403, detail="Unauthorized access")
     
     users = db.query(models.User).all()
-    tasks = db.query(models.Task).all()
-    
-    user_list = []
+    overview = []
     for u in users:
-        u_tasks = [t for t in tasks if t.owner_id == u.id]
-        user_list.append({
+        task_count = db.query(models.Task).filter(models.Task.owner_id == u.id).count()
+        overview.append({
             "id": u.id,
             "username": u.username,
             "is_admin": u.is_admin,
-            "task_count": len(u_tasks),
-            "tasks": [{"id": t.id, "title": t.title, "completed": t.completed} for t in u_tasks]
+            "task_count": task_count
         })
-    return user_list
+    return overview
 
-# User khud apna account delete kar sake
+# ================= DELETE ROUTES =================
 @router.delete("/users/me")
 def delete_own_account(
     db: Session = Depends(database.get_db), 
@@ -138,7 +128,6 @@ def delete_own_account(
     db.commit()
     return {"message": "Account deleted successfully"}
 
-# Admin kisi bhi user ko delete kar sake
 @router.delete("/admin/users/{user_id}")
 def delete_user_by_admin(
     user_id: int, 
